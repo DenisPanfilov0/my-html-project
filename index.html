@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Цветной Merge 15x15</title>
+<title>Merge 15x15</title>
 <style>
 :root{ --cell:32px; --gap:3px; }
 body{font-family:Inter, Roboto, Arial; background:#0f1724; color:#e6eef8; display:flex; align-items:flex-start; justify-content:center; padding:20px;}
@@ -13,7 +13,8 @@ body{font-family:Inter, Roboto, Arial; background:#0f1724; color:#e6eef8; displa
 .cell{ width:calc(var(--cell)); height:calc(var(--cell)); background:rgba(255,255,255,0.02); border-radius:6px; position:relative; overflow:hidden; }
 .cell.highlight{ outline:2px solid rgba(255,255,255,0.06); }
 .tile{ position:absolute; inset:4px; border-radius:6px; transition:transform .18s cubic-bezier(.2,.9,.25,1),opacity .18s; }
-.ghost{ opacity:.45; transform:scale(.98); }
+.ghost{ opacity:.35; transform:scale(.95); }
+.ghost.invalid{ outline:2px solid red; }
 .particle { position:absolute; width:4px; height:4px; border-radius:50%; pointer-events:none; }
 .ui{ width:320px; display:flex; flex-direction:column; gap:12px; }
 .panel{ background:linear-gradient(180deg,#071326,#082034); padding:12px; border-radius:10px; box-shadow:0 6px 20px rgba(2,6,23,.6);} 
@@ -25,8 +26,8 @@ button{ background:#17384d; color:#dff3ff; border:0; padding:8px 10px; border-ra
 .small{ padding:6px 8px; font-size:13px }
 .meta{ display:flex; gap:8px; justify-content:space-between; align-items:center; }
 .score{ font-size:16px; }
-.color0{background:#e74c3c;} .color1{background:#3498db;} .color2{background:#2ecc71;} .color3{background:#f1c40f;}
-.color4{background:#9b59b6;} .color5{background:#1abc9c;} .color6{background:#e67e22;} .color7{background:#95a5a6;}
+.color0{background:#e74c3c;} .color1{background:#3498db;} .color2{background:#2ecc71;}
+.color3{background:#f1c40f;} .color4{background:#9b59b6;} .color5{background:#1abc9c;}
 .color-picker{ position:absolute; display:flex; gap:4px; background:rgba(0,0,0,.6); padding:4px; border-radius:6px; z-index:1000;}
 .color-btn{ width:20px; height:20px; border-radius:4px; cursor:pointer; }
 #bonus-container{ display:flex; justify-content:flex-end; margin-top:6px; }
@@ -59,7 +60,7 @@ button{ background:#17384d; color:#dff3ff; border:0; padding:8px 10px; border-ra
 </div>
 
 <script>
-const ROWS=15, COLS=15;
+const ROWS=15,COLS=15;
 const gridEl=document.getElementById('grid');
 const queueEl=document.getElementById('queue');
 const scoreEl=document.getElementById('score');
@@ -74,7 +75,7 @@ let currentRotation=0;
 let score=0;
 let bonusActive=false;
 
-const COLORS=["color0","color1","color2","color3","color4","color5","color6","color7"];
+const COLORS=["color0","color1","color2","color3","color4","color5"];
 const SHAPES=[
   [[0,0]], [[0,0],[1,0]], [[0,0],[0,1]], [[0,0],[1,0],[0,1],[1,1]],
   [[0,0],[1,0],[2,0]], [[0,0],[0,1],[0,2]], [[0,0],[1,0],[1,1]], [[0,0],[0,1],[1,1]],
@@ -83,7 +84,7 @@ const SHAPES=[
 
 function uid(){return Math.random().toString(36).slice(2,9);}
 function rotateShape(shape){return shape.map(([x,y])=>[y,-x]);}
-function normalize(shape){let minx=Math.min(...shape.map(s=>s[0])); let miny=Math.min(...shape.map(s=>s[1])); return shape.map(([x,y])=>[x-minx,y-miny]);}
+function normalize(shape){let minx=Math.min(...shape.map(s=>s[0])),miny=Math.min(...shape.map(s=>s[1]));return shape.map(([x,y])=>[x-minx,y-miny]);}
 function indexAt(r,c){if(r<0||c<0||r>=ROWS||c>=COLS) return -1; return r*COLS+c;}
 
 function createGrid(){
@@ -93,8 +94,6 @@ function createGrid(){
       const cell=document.createElement('div');
       cell.className='cell'; cell.dataset.r=r; cell.dataset.c=c;
       cell.addEventListener('click', ()=>onCellClick(r,c));
-      cell.addEventListener('mouseenter', ()=>showGhost(r,c));
-      cell.addEventListener('mouseleave', ()=>clearGhost());
       gridEl.appendChild(cell);
       board.push(null);
     }
@@ -116,6 +115,7 @@ function generateColors(shape){
 
 function randomPiece(){ const shape=normalize(SHAPES[Math.floor(Math.random()*SHAPES.length)].map(s=>[s[0],s[1]])); return {shape, colors:generateColors(shape), id:uid()};}
 function refillQueue(){while(queue.length<3) queue.push(randomPiece()); renderQueue();}
+
 function renderQueue(){
   queueEl.innerHTML='';
   queue.forEach((p,i)=>{
@@ -144,10 +144,12 @@ function renderPiecePreview(piece,isActive){
 }
 
 function renderBoard(){
-  document.querySelectorAll('.cell').forEach((el,i)=>{
+  const cells=document.querySelectorAll('.cell');
+  cells.forEach((el,i)=>{
     el.querySelectorAll(':scope>.tile:not(.ghost)').forEach(n=>n.remove());
     const tile=board[i]; if(tile){ const t=document.createElement('div'); t.className='tile '+COLORS[tile.color]; el.appendChild(t);}
   });
+  showAllGhosts();
 }
 
 function canPlace(shape,r0,c0){for(const [x,y] of shape){const r=r0+y,c=c0+x,idx=indexAt(r,c); if(idx<0||board[idx]) return false;} return true;}
@@ -161,24 +163,12 @@ function onCellClick(r,c){
   if(!canPlace(sh,r,c)){flashCell(r,c); return;}
   sh.forEach(([x,y],idx)=>{const rr=r+y,cc=c+x,idxb=indexAt(rr,cc); board[idxb]={color:piece.colors[idx], id:piece.id};});
   queue.splice(activeIndex,1); refillQueue(); activeIndex=0; currentRotation=0; renderQueue(); renderBoard();
-  spawnRandomCell(); // сразу кубик после установки
-  checkBoardMerge(); // проверка всей доски на соединения
+  spawnRandomCell();
+  checkBoardMerge();
 }
 
 function flashCell(r,c){const idx=indexAt(r,c); if(idx<0) return; const cell=document.querySelectorAll('.cell')[idx]; cell.classList.add('highlight'); setTimeout(()=>cell.classList.remove('highlight'),300);}
-
-function spawnRandomCell(){
-  let attempts=0;
-  while(attempts<50){
-    const r=Math.floor(Math.random()*ROWS);
-    const c=Math.floor(Math.random()*COLS);
-    const idx=indexAt(r,c);
-    if(!board[idx]){
-      board[idx]={color:Math.floor(Math.random()*COLORS.length), id:uid()}; renderBoard(); break;
-    }
-    attempts++;
-  }
-}
+function spawnRandomCell(){let attempts=0; while(attempts<50){const r=Math.floor(Math.random()*ROWS); const c=Math.floor(Math.random()*COLS); const idx=indexAt(r,c); if(!board[idx]){board[idx]={color:Math.floor(Math.random()*COLORS.length), id:uid()}; renderBoard(); break;} attempts++;}}
 
 function checkBoardMerge(){
   const visited=Array(ROWS).fill(0).map(()=>Array(COLS).fill(false));
@@ -195,15 +185,14 @@ function checkBoardMerge(){
           if(visited[rr][cc]) continue;
           const t=board[indexAt(rr,cc)];
           if(!t || t.color!==color) continue;
-          visited[rr][cc]=true;
-          cluster.push([rr,cc]);
+          visited[rr][cc]=true; cluster.push([rr,cc]);
           stack.push([rr+1,cc],[rr-1,cc],[rr,cc+1],[rr,cc-1]);
         }
         if(cluster.length>=3){hasMerge=true; cluster.forEach(([rr,cc])=>{board[indexAt(rr,cc)]=null; spawnParticles(rr,cc,COLORS[color]); score++;});}
       }
     }
   }
-  if(hasMerge){renderBoard(); scoreEl.textContent=score; setTimeout(checkBoardMerge, 150);}
+  if(hasMerge){renderBoard(); scoreEl.textContent=score; setTimeout(checkBoardMerge,150);}
 }
 
 function spawnParticles(r,c,colorClass){ 
@@ -218,15 +207,33 @@ function spawnParticles(r,c,colorClass){
   }
 }
 
-function showGhost(r,c){ clearGhost(); const piece=queue[activeIndex]; if(!piece) return;
-  let sh=piece.shape.map(s=>[s[0],s[1]]); for(let i=0;i<currentRotation;i++) sh=rotateShape(sh); sh=normalize(sh);
-  if(!canPlace(sh,r,c)) return; const cells=document.querySelectorAll('.cell');
-  sh.forEach(([x,y],idx)=>{const idxb=indexAt(r+y,c+x); if(idxb>=0){const ghost=document.createElement('div'); ghost.className='tile '+COLORS[piece.colors[idx]]+' ghost'; cells[idxb].appendChild(ghost);}});
+function showAllGhosts(){
+  clearGhost();
+  const piece=queue[activeIndex]; if(!piece) return;
+  const cells=document.querySelectorAll('.cell');
+  for(let r=0;r<ROWS;r++){
+    for(let c=0;c<COLS;c++){
+      let sh=piece.shape.map(s=>[s[0],s[1]]);
+      for(let i=0;i<currentRotation;i++) sh=rotateShape(sh);
+      sh=normalize(sh);
+      let valid=canPlace(sh,r,c);
+      sh.forEach(([x,y],idx)=>{
+        const idxb=indexAt(r+y,c+x);
+        if(idxb>=0){
+          const ghost=document.createElement('div');
+          ghost.className='tile '+COLORS[piece.colors[idx]]+' ghost';
+          if(!valid) ghost.classList.add('invalid');
+          cells[idxb].appendChild(ghost);
+        }
+      });
+    }
+  }
 }
+
 function clearGhost(){document.querySelectorAll('.cell').forEach(c=>c.querySelectorAll('.ghost').forEach(g=>g.remove()));}
 
-rotateBtn.addEventListener('click',()=>{currentRotation=(currentRotation+1)%4; renderQueue();});
-window.addEventListener('keydown', e=>{if(e.key==='r'||e.key==='R'){currentRotation=(currentRotation+1)%4; renderQueue();}});
+rotateBtn.addEventListener('click',()=>{currentRotation=(currentRotation+1)%4; renderQueue(); renderBoard();});
+window.addEventListener('keydown', e=>{if(e.key==='r'||e.key==='R'){currentRotation=(currentRotation+1)%4; renderQueue(); renderBoard();}});
 restartBtn.addEventListener('click',()=>init());
 bonusBtn.addEventListener('click',()=>{bonusActive=!bonusActive; bonusBtn.style.background=bonusActive?'#388e3c':'#2e7d32';});
 
