@@ -14,7 +14,7 @@ body{font-family:Inter, Roboto, Arial; background:#0f1724; color:#e6eef8; displa
 .cell.highlight{ outline:2px solid rgba(255,255,255,0.06); }
 .tile{ position:absolute; inset:4px; border-radius:6px; transition:transform .18s cubic-bezier(.2,.9,.25,1),opacity .18s; }
 .ghost{ opacity:.35; transform:scale(.95); }
-.ghost.invalid{ outline:2px solid red; }
+.ghost.invalid{ outline:2px solid red; opacity:.45; }
 .particle { position:absolute; width:4px; height:4px; border-radius:50%; pointer-events:none; }
 .ui{ width:320px; display:flex; flex-direction:column; gap:12px; }
 .panel{ background:linear-gradient(180deg,#071326,#082034); padding:12px; border-radius:10px; box-shadow:0 6px 20px rgba(2,6,23,.6);} 
@@ -28,10 +28,6 @@ button{ background:#17384d; color:#dff3ff; border:0; padding:8px 10px; border-ra
 .score{ font-size:16px; }
 .color0{background:#e74c3c;} .color1{background:#3498db;} .color2{background:#2ecc71;}
 .color3{background:#f1c40f;} .color4{background:#9b59b6;} .color5{background:#1abc9c;}
-.color-picker{ position:absolute; display:flex; gap:4px; background:rgba(0,0,0,.6); padding:4px; border-radius:6px; z-index:1000;}
-.color-btn{ width:20px; height:20px; border-radius:4px; cursor:pointer; }
-#bonus-container{ display:flex; justify-content:flex-end; margin-top:6px; }
-#bonus-btn{ background:#2e7d32; color:#fff; }
 </style>
 </head>
 <body>
@@ -52,9 +48,6 @@ button{ background:#17384d; color:#dff3ff; border:0; padding:8px 10px; border-ra
         <button id="rotate" class="small">Повернуть (R)</button>
         <button id="restart" class="small">Перезапуск</button>
       </div>
-      <div id="bonus-container">
-        <button id="bonus-btn" class="small">Бонус: Изменить цвет</button>
-      </div>
     </div>
   </div>
 </div>
@@ -66,14 +59,8 @@ const queueEl=document.getElementById('queue');
 const scoreEl=document.getElementById('score');
 const rotateBtn=document.getElementById('rotate');
 const restartBtn=document.getElementById('restart');
-const bonusBtn=document.getElementById('bonus-btn');
 
-let board=[];
-let queue=[];
-let activeIndex=0;
-let currentRotation=0;
-let score=0;
-let bonusActive=false;
+let board=[], queue=[], activeIndex=0, currentRotation=0, score=0;
 
 const COLORS=["color0","color1","color2","color3","color4","color5"];
 const SHAPES=[
@@ -94,6 +81,8 @@ function createGrid(){
       const cell=document.createElement('div');
       cell.className='cell'; cell.dataset.r=r; cell.dataset.c=c;
       cell.addEventListener('click', ()=>onCellClick(r,c));
+      cell.addEventListener('mouseenter', ()=>showGhost(r,c));
+      cell.addEventListener('mouseleave', ()=>clearGhost());
       gridEl.appendChild(cell);
       board.push(null);
     }
@@ -124,8 +113,7 @@ function renderQueue(){
     if(i===activeIndex) box.style.outline='2px solid #fff';
     const prev=renderPiecePreview(p,i===activeIndex);
     box.appendChild(prev);
-    box.addEventListener('click',()=>{activeIndex=i; currentRotation=0; renderQueue();});
-    box.addEventListener('contextmenu',(e)=>{e.preventDefault(); if(bonusActive) showColorPickerPreview(p, box);});
+    box.addEventListener('click',()=>{activeIndex=i; currentRotation=0; renderQueue(); renderBoard();});
     queueEl.appendChild(box);
   });
 }
@@ -149,13 +137,11 @@ function renderBoard(){
     el.querySelectorAll(':scope>.tile:not(.ghost)').forEach(n=>n.remove());
     const tile=board[i]; if(tile){ const t=document.createElement('div'); t.className='tile '+COLORS[tile.color]; el.appendChild(t);}
   });
-  showAllGhosts();
 }
 
 function canPlace(shape,r0,c0){for(const [x,y] of shape){const r=r0+y,c=c0+x,idx=indexAt(r,c); if(idx<0||board[idx]) return false;} return true;}
 
 function onCellClick(r,c){
-  if(bonusActive) return; 
   const piece=queue[activeIndex]; if(!piece) return;
   let sh=piece.shape.map(s=>[s[0],s[1]]);
   for(let i=0;i<currentRotation;i++) sh=rotateShape(sh);
@@ -207,27 +193,23 @@ function spawnParticles(r,c,colorClass){
   }
 }
 
-function showAllGhosts(){
+function showGhost(rHover,cHover){
   clearGhost();
   const piece=queue[activeIndex]; if(!piece) return;
   const cells=document.querySelectorAll('.cell');
-  for(let r=0;r<ROWS;r++){
-    for(let c=0;c<COLS;c++){
-      let sh=piece.shape.map(s=>[s[0],s[1]]);
-      for(let i=0;i<currentRotation;i++) sh=rotateShape(sh);
-      sh=normalize(sh);
-      let valid=canPlace(sh,r,c);
-      sh.forEach(([x,y],idx)=>{
-        const idxb=indexAt(r+y,c+x);
-        if(idxb>=0){
-          const ghost=document.createElement('div');
-          ghost.className='tile '+COLORS[piece.colors[idx]]+' ghost';
-          if(!valid) ghost.classList.add('invalid');
-          cells[idxb].appendChild(ghost);
-        }
-      });
+  let sh=piece.shape.map(s=>[s[0],s[1]]);
+  for(let i=0;i<currentRotation;i++) sh=rotateShape(sh);
+  sh=normalize(sh);
+  const valid=canPlace(sh,rHover,cHover);
+  sh.forEach(([x,y],idx)=>{
+    const idxb=indexAt(rHover+y,cHover+x);
+    if(idxb>=0){
+      const ghost=document.createElement('div');
+      ghost.className='tile '+COLORS[piece.colors[idx]]+' ghost';
+      if(!valid) ghost.classList.add('invalid');
+      cells[idxb].appendChild(ghost);
     }
-  }
+  });
 }
 
 function clearGhost(){document.querySelectorAll('.cell').forEach(c=>c.querySelectorAll('.ghost').forEach(g=>g.remove()));}
@@ -235,23 +217,6 @@ function clearGhost(){document.querySelectorAll('.cell').forEach(c=>c.querySelec
 rotateBtn.addEventListener('click',()=>{currentRotation=(currentRotation+1)%4; renderQueue(); renderBoard();});
 window.addEventListener('keydown', e=>{if(e.key==='r'||e.key==='R'){currentRotation=(currentRotation+1)%4; renderQueue(); renderBoard();}});
 restartBtn.addEventListener('click',()=>init());
-bonusBtn.addEventListener('click',()=>{bonusActive=!bonusActive; bonusBtn.style.background=bonusActive?'#388e3c':'#2e7d32';});
-
-function showColorPickerPreview(piece, container){
-  const existing=document.querySelector('.color-picker'); if(existing) existing.remove();
-  const picker=document.createElement('div'); picker.className='color-picker';
-  COLORS.forEach((color,i)=>{
-    const btn=document.createElement('div'); btn.className='color-btn '+color;
-    btn.style.background=window.getComputedStyle(document.querySelector('.'+color)).backgroundColor;
-    btn.addEventListener('click',()=>{piece.colors=piece.colors.map(_=>i); renderQueue(); picker.remove();});
-    picker.appendChild(btn);
-  });
-  document.body.appendChild(picker);
-  const rect=container.getBoundingClientRect();
-  picker.style.left=rect.left+'px'; picker.style.top=(rect.bottom+4)+'px';
-  const hidePicker=(e)=>{if(!picker.contains(e.target)){picker.remove(); document.removeEventListener('click',hidePicker);}};
-  setTimeout(()=>document.addEventListener('click',hidePicker),10);
-}
 
 function init(){
   createGrid(); score=0; scoreEl.textContent=score; queue=[]; refillQueue(); renderBoard();
